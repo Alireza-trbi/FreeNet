@@ -19,29 +19,31 @@ check_status() {
     fi
 }
 
-# بارگذاری توابع کمکی
+# بارگذاری توابع کمکی AmneziaWG
 if [ -f "$(pwd)/lib.sh" ]; then
     . $(pwd)/lib.sh
 else
     warning "lib.sh not found, proceeding without it."
 fi
 
-# دریافت اطلاعات OpenWrt
-if [ ! -f /etc/openwrt_release ]; then
-    error "/etc/openwrt_release not found."
-    exit 1
-fi
-. /etc/openwrt_release
-TARGET_MOD="${DISTRIB_TARGET//\//_}"
-ARCH_SUFFIX="${DISTRIB_ARCH}_${TARGET_MOD}"
-info "Detected architecture suffix: ${ARCH_SUFFIX}"
-
 # نسخه‌ها و URLها
 AWG_VERSION="24.10.4"
 AWG_BASE_URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/v${AWG_VERSION}"
 PASSWALL_FEED_BASE="https://master.dl.sourceforge.net/project/openwrt-passwall-build/releases/packages"
 
-# --- توابع نصب AmneziaWG ---
+# بررسی وجود /etc/openwrt_release
+if [ ! -f /etc/openwrt_release ]; then
+    error "/etc/openwrt_release not found. Cannot determine architecture."
+    exit 1
+fi
+. /etc/openwrt_release
+
+# محاسبه ARCH_SUFFIX
+TARGET_MOD="${DISTRIB_TARGET//\//_}"
+ARCH_SUFFIX="${DISTRIB_ARCH}_${TARGET_MOD}"
+info "Detected architecture suffix: ${ARCH_SUFFIX}"
+
+# توابع نصب
 install_awg_package() {
     local pkg="$1"
     local file="${pkg}_v${AWG_VERSION}_${ARCH_SUFFIX}.ipk"
@@ -55,7 +57,6 @@ install_awg_package() {
     success "Installed ${file}"
 }
 
-# --- نصب PassWall2 ---
 install_passwall() {
     info "Adding PassWall2 key..."
     wget -O /tmp/passwall.pub https://master.dl.sourceforge.net/project/openwrt-passwall-build/passwall.pub >> "$LOG_FILE" 2>&1
@@ -94,44 +95,6 @@ EOFF
     success "PassWall2 configured for Iran"
 }
 
-# --- نصب PBR ---
-install_pbr() {
-    if ! opkg list-installed | grep -q "^luci-app-pbr "; then
-        info "Updating package list..."
-        opkg update >> "$LOG_FILE" 2>&1
-        check_status "opkg update"
-        info "Installing pbr..."
-        opkg install luci-app-pbr >> "$LOG_FILE" 2>&1
-        check_status "pbr installation"
-        success "pbr installed"
-    else
-        success "luci-app-pbr already installed; skipping"
-    fi
-
-    # اضافه کردن سیاست‌های ایران
-    info "Adding Iranian policies to PBR..."
-    if ! uci show pbr | grep -q "\.name='irip'"; then
-        uci add pbr policy
-        uci set pbr.@policy[-1].name='irip'
-        uci set pbr.@policy[-1].dest_addr='https://raw.githubusercontent.com/iranopenwrt/auto/refs/heads/main/resources/pbr-iplist-iran-v4'
-        uci set pbr.@policy[-1].interface='wan'
-    fi
-    if ! uci show pbr | grep -q "\.name='irdomains'"; then
-        uci add pbr policy
-        uci set pbr.@policy[-1].name='irdomains'
-        uci set pbr.@policy[-1].dest_addr='ir'
-        uci set pbr.@policy[-1].interface='wan'
-    fi
-    uci commit pbr
-    success "Iranian policies added to PBR"
-
-    # فعال‌سازی و راه‌اندازی PBR
-    /etc/init.d/pbr enable >> "$LOG_FILE" 2>&1
-    /etc/init.d/pbr start >> "$LOG_FILE" 2>&1
-    success "PBR enabled and started"
-}
-
-# --- اجرای نصب‌ها ---
 # نصب AmneziaWG
 AWG_PACKAGES="kmod-amneziawg amneziawg-tools luci-proto-amneziawg"
 for PKG in $AWG_PACKAGES; do
@@ -145,12 +108,16 @@ done
 # نصب PassWall2
 install_passwall
 
-# نصب PBR و اعمال سیاست‌های ایران
-install_pbr
+success "Combined installation of AmneziaWG and PassWall2 completed."
 
-success "Combined installation of AmneziaWG, PassWall2, and PBR completed."
-
-# ریبوت خودکار
-info "Rebooting system in 5 seconds..."
-sleep 5
-reboot
+# ریبوت اختیاری
+read -p "Do you want to reboot now? [y/N]: " REBOOT_CONFIRM
+case "$REBOOT_CONFIRM" in
+    [yY]|[yY][eE][sS])
+        info "Rebooting system..."
+        reboot
+        ;;
+    *)
+        info "Reboot skipped. Installation complete."
+        ;;
+esac
